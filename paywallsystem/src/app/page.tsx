@@ -1,33 +1,66 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Session } from 'next-auth';
 
-type Video = {
+// Define types in a separate interface
+interface Video {
   guid: string;
   title: string;
   videoLibraryId: string;
-  playbackUrl: string; // HLS or direct streaming URL
-};
+  playbackUrl: string;
+}
 
-const Home: React.FC = () => {
+interface ApiResponse {
+  videos: Video[];
+}
+
+export default function Home() {
+  const router = useRouter();
   const [videos, setVideos] = useState<Video[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch videos data from backend
+  // Check authentication
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const response = await fetch('/api/auth/session');
+        const session: Session | null = await response.json();
+
+        if (!session) {
+          router.push('/api/auth/signin');
+        }
+      } catch (err) {
+        console.error('Auth check failed:', err);
+        setError('Authentication error');
+      }
+    };
+
+    checkAuth();
+  }, [router]);
+
+  // Fetch videos
   useEffect(() => {
     const fetchVideos = async () => {
       try {
-        const response = await fetch('http://localhost:8000/api/streams'); // Backend endpoint
-        if (response.ok) {
-          const data = await response.json();
-          setVideos(data.videos || []); // Assuming 'videos' is the key in the response
-        } else {
-          setError('Failed to fetch videos from the server');
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/streams`, {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
-      } catch (error) {
-        setError('Error fetching videos. Please try again later.');
-        console.error('Error fetching videos:', error);
+
+        const data: ApiResponse = await response.json();
+        setVideos(data.videos || []);
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Failed to fetch videos';
+        setError(errorMessage);
+        console.error('Error fetching videos:', err);
       } finally {
         setLoading(false);
       }
@@ -36,35 +69,51 @@ const Home: React.FC = () => {
     fetchVideos();
   }, []);
 
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center min-h-screen">
+        <p className="text-lg">Loading videos...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex justify-center items-center min-h-screen">
+        <p className="text-red-600 text-lg">{error}</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="container mx-auto p-4">
-      <h1 className="text-center text-2xl font-bold mb-6">All Videos</h1>
-      {loading ? (
-        <p className="text-center">Loading videos...</p>
-      ) : error ? (
-        <p className="text-center text-red-600">{error}</p>
-      ) : videos.length > 0 ? (
+    <main className="container mx-auto px-4 py-8">
+      <h1 className="text-3xl font-bold text-center mb-8">All Videos</h1>
+
+      {videos.length === 0 ? (
+        <p className="text-center text-lg text-gray-600">No videos available</p>
+      ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {videos.map((video) => (
-            <div key={video.guid} className="video-card shadow-md p-4 rounded-md">
-              <iframe
-                width="100%"
-                height="300px"
-                src={`https://iframe.mediadelivery.net/embed/${video.videoLibraryId}/${video.guid}?autoplay=0`} // BunnyCDN iframe embed URL
-                frameBorder="0"
-                allow="autoplay; fullscreen"
-                title={`Video: ${video.title}`}
-                className="rounded-md"
-              ></iframe>
-              <p className="text-center mt-2 font-medium">{video.title}</p>
-            </div>
+            <article
+              key={video.guid}
+              className="bg-white rounded-lg shadow-lg overflow-hidden"
+            >
+              <div className="aspect-video relative">
+                <iframe
+                  className="absolute inset-0 w-full h-full"
+                  src={`https://iframe.mediadelivery.net/embed/${video.videoLibraryId}/${video.guid}?autoplay=0`}
+                  title={video.title}
+                  allow="autoplay; fullscreen"
+                  allowFullScreen
+                />
+              </div>
+              <div className="p-4">
+                <h2 className="text-lg font-semibold text-center">{video.title}</h2>
+              </div>
+            </article>
           ))}
         </div>
-      ) : (
-        <p className="text-center">No videos available</p>
       )}
-    </div>
+    </main>
   );
-};
-
-export default Home;
+}
